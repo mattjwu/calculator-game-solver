@@ -22,9 +22,33 @@ class Add(Button):
 	def push(self, num, turn):
 		return self.val + num
 
+class AddToButtons(Button):
+	def set_buttons(self, buttons):
+		self.buttons = []
+		for button in buttons:
+			should_add_button = (
+				hasattr(button, 'val')
+				and type(button.val) == int
+				and button != self
+			)
+			if should_add_button:
+				self.buttons.append(button)
+
+	def push(self, num, turn):
+		for button in self.buttons:
+			button.val += self.val
+
+	def reset(self, num, turn):
+		for button in self.buttons:
+			button.val -= self.val
+
 class Append(Button):
 	def push(self, num, turn):
 		return int(str(num) + str(self.val))
+
+class Divide(Button):
+	def push(self, num, turn):
+		return num / self.val
 
 class Inv(Button):
 	def push(self, num, turn):
@@ -114,11 +138,14 @@ class Store(Button):
 			)
 		return possible
 
-
 class Sub(Add):
 	def __init__(self, *args):
 		super().__init__(args)
 		self.val = -self.val
+
+class Sum(Button):
+	def push(self, num, turn):
+		return sum([int(digit) for digit in str(num)])
 
 
 class Problem:
@@ -129,10 +156,13 @@ class Problem:
 		self.buttons = buttons
 		self.portal = portal
 		self.store = None
+		self.add_to_buttons = None
 		for button in buttons:
 			if isinstance(button, Store):
 				self.store = button
-				break
+			elif isinstance(button, AddToButtons):
+				self.add_to_buttons = button
+				self.add_to_buttons.set_buttons(buttons)
 
 	def solve(self):
 		return self._solve(self.initial, 0)
@@ -146,6 +176,7 @@ class Problem:
 
 		for button in self.buttons:
 			self._update_store(num, turn)
+
 			if button == self.store:
 				saved_used = self.store.used
 				new_num_pairs = self.store.push(num, turn)
@@ -155,7 +186,12 @@ class Problem:
 				]
 				explored = set()
 				for idx, new_num in new_num_pairs:
-					if (new_num in explored or new_num == num):
+					should_skip = (
+						(new_num in explored)
+						or (new_num == num)
+						or (not self._num_is_valid())
+					)
+					if should_skip:
 						continue
 					explored.add(new_num)
 
@@ -170,19 +206,44 @@ class Problem:
 				self.store.set_used(saved_used)
 				continue
 
-			new_num = button.push(num, turn)
-			new_num = self._handle_portal(new_num)
+			if button == self.add_to_buttons:
+				self.add_to_buttons.push(num, turn)
+				rest_soln = self._solve(num, turn + 1)
 
-			if new_num == num:
+				if rest_soln is not None:
+					this = [num, self.add_to_buttons.get_rep()]
+					self.add_to_buttons.reset(num, turn)
+					return this + rest_soln
+				self.add_to_buttons.reset(num, turn)
 				continue
 
-			rest_soln = self._solve(new_num, turn + 1)
+			new_num = button.push(num, turn)
+			cleaned_num = self._num_is_valid(new_num)
+			if cleaned_num is False:
+				continue
+
+			cleaned_num = self._handle_portal(cleaned_num)
+
+			if cleaned_num == num or cleaned_num is False:
+				continue
+
+			cleaned_num = cleaned_num
+
+			rest_soln = self._solve(cleaned_num, turn + 1)
 			self._reset_store(num, turn)
 
 			if rest_soln is not None:
 				return [
 					num, button.get_rep()
 				] + rest_soln
+
+	def _num_is_valid(self, num):
+		if int(num) != num:
+			return False
+		num = int(num)
+		if len(str(num)) > 6:
+			return False
+		return num
 
 	def _update_store(self, num, turn):
 		if self.store is None:
@@ -209,12 +270,15 @@ class Problem:
 		return self._handle_portal(new_num)
 
 
-p = Problem(1, 12131412131, 6,
+p = Problem(613, 777, 5,
 	[
-		Store(),
-		Append(2),
-		Append(3),
-		Append(4)
+		Append(5),
+		Multiply(2),
+		Add(3),
+		Reverse(),
+		Inv(),
 	],
+	[4, 1],
 )
+
 print(p.solve())
