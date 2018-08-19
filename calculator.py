@@ -7,10 +7,7 @@ class Button:
 	def push(self, num, turn):
 		return num
 
-	def upkeep(self, num, turn):
-		pass
-
-	def get_rep(self, idx):
+	def get_rep(self):
 		name = self._get_class_name()
 		if hasattr(self, 'val') and self.val:
 			return name + '({})'.format(self.val)
@@ -20,11 +17,6 @@ class Button:
 		s = str(self)
 		return s[10:s.index('object') - 1]
 
-	def handle_used(self, turn):
-		pass
-
-	def reset(self, num, turn):
-		pass
 
 class Add(Button):
 	def push(self, num, turn):
@@ -75,44 +67,53 @@ class Shift(Button):
 
 class Store(Button):
 	def __init__(self):
-		self.possible = []
+		self.used = None
+		self.previous = []
 		self.pushes = []
 
-	# TODO: I think that I'm missing the number that you push
-	# e.g. I think if you have 1, 2, 3, and on turn 4 you use 2
-	# then it won't keep track of you still being allowed to use 2
-	# but it will correctly ignore 1 and 3 i'm not sure too much brain
 	def push(self, num, turn):
 		lst = [
-			int(str(num) + str(poss_num))
-			for poss_num in self.possible[self._get_push_index():]
+			[idx, int(str(num) + str(poss_num))]
+			for idx, poss_num in self._get_possible()
 		]
 		self.pushes.append(turn)
 		return lst
 
 	def upkeep(self, num, turn):
-		self.possible[turn:] = []
-		self.possible.append(num)
+		self.previous[turn:] = []
+		self.previous.append(num)
 		self.pushes = list(filter(
 			lambda x: x < turn, self.pushes
 		))
 
 	def reset(self, num, turn):
-		self.possible[turn:] = []
-		self.possible.append(num)
+		self.previous[turn:] = []
+		self.previous.append(num)
 		self.pushes = list(filter(
 			lambda x: x < turn, self.pushes
 		))
 
-	def get_rep(self, idx):
-		prefix = super().get_rep(idx)
-		return prefix + '({})'.format(self.possible[self._get_push_index():][idx])
+	def set_used(self, idx):
+		self.used = idx
 
-	def _get_push_index(self):
-		push_index = 0
-		if self.pushes:
-			push_index = self.pushes[-1]
-		return push_index
+	def get_rep(self):
+		prefix = super().get_rep()
+		return prefix + '({})'.format(self.previous[self.used])
+
+	def _get_possible(self):
+		latest_push = self.pushes[-1] if self.pushes else -1
+		last_used = None
+		if self.used is not None:
+			last_used = self.previous[self.used]
+		possible = []
+		if last_used:
+			possible.append([self.used, self.previous[self.used]])
+		for i in range(latest_push + 1, len(self.previous)):
+			possible.append(
+				[i, self.previous[i]]
+			)
+		return possible
+
 
 class Sub(Add):
 	def __init__(self, *args):
@@ -127,6 +128,11 @@ class Problem:
 		self.max_turns = max_turns
 		self.buttons = buttons
 		self.portal = portal
+		self.store = None
+		for button in buttons:
+			if isinstance(button, Store):
+				self.store = button
+				break
 
 	def solve(self):
 		return self._solve(self.initial, 0)
@@ -138,34 +144,59 @@ class Problem:
 		if turn == self.max_turns:
 			return None
 
-		for _button in self.buttons:
-			_button.upkeep(num, turn)
-
 		for button in self.buttons:
-			new_nums = button.push(num, turn)
-			if type(new_nums) != list:
-				new_nums = [new_nums]
-			if self.portal:
-				new_nums = [
-					self._handle_portal(num)
-					for num in new_nums
+			self._update_store(num, turn)
+			if button == self.store:
+				saved_used = self.store.used
+				new_num_pairs = self.store.push(num, turn)
+				new_num_pairs = [
+					[pair[0], self._handle_portal(pair[1])]
+					for pair in new_num_pairs
 				]
+				explored = set()
+				for idx, new_num in new_num_pairs:
+					if (new_num in explored or new_num == num):
+						continue
+					explored.add(new_num)
 
-			explored = set()
-			for idx, new_num in enumerate(new_nums):
-				if (new_num in explored) or (new_num == num):
-					continue
-				explored.add(new_num)
+					self.store.set_used(idx)
+					rest_soln = self._solve(new_num, turn + 1)
+					self._reset_store(num, turn)
+					self.turn = turn
+					if rest_soln is not None:
+						this = [num, self.store.get_rep()]
+						self.store.set_used(saved_used)
+						return this + rest_soln
+				self.store.set_used(saved_used)
+				continue
 
-				rest_soln = self._solve(new_num, turn + 1)
-				for _button in self.buttons:
-					_button.reset(num, turn)
-				if rest_soln is not None:
-					return [
-						num, button.get_rep(idx)
-					] + rest_soln
+			new_num = button.push(num, turn)
+			new_num = self._handle_portal(new_num)
+
+			if new_num == num:
+				continue
+
+			rest_soln = self._solve(new_num, turn + 1)
+			self._reset_store(num, turn)
+
+			if rest_soln is not None:
+				return [
+					num, button.get_rep()
+				] + rest_soln
+
+	def _update_store(self, num, turn):
+		if self.store is None:
+			return
+		self.store.upkeep(num, turn)
+
+	def _reset_store(self, num, turn):
+		if self.store is None:
+			return
+		self.store.reset(num, turn)
 
 	def _handle_portal(self, num):
+		if self.portal is None:
+			return num
 		entrance, exit = self.portal
 		if len(str(num)) < entrance:
 			return num
@@ -178,14 +209,12 @@ class Problem:
 		return self._handle_portal(new_num)
 
 
-p = Problem(189, 500, 6,
+p = Problem(1, 12131412131, 6,
 	[
-		Add(8),
-		Multiply(4),
-		Inv(),
-		Append(9),
-		Replace(7, 0)
+		Store(),
+		Append(2),
+		Append(3),
+		Append(4)
 	],
-	[4, 1]
 )
 print(p.solve())
