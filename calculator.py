@@ -270,15 +270,15 @@ class Problem:
 		return self._handle_portal(new_num)
 
 
-p = Problem(613, 777, 5,
+p = Problem(4, 750, 7,
 	[
-		Append(5),
-		Multiply(2),
-		Add(3),
-		Reverse(),
+		Add(6),
+		Append(4),
 		Inv(),
+		Multiply(3),
 	],
-	[4, 1],
+	[4, 2],
 )
+
 
 print(p.solve())
